@@ -6,5 +6,5 @@ save_non_project_files = False
 
 [main]
 version = 0.2.0
-recent_files = ['SpaceInvaders-v0\\train.py', 'SpaceInvaders-v0\\PPO_agent.py', 'SpaceInvaders-v0\\PPO_NN.py', 'SpaceInvaders-v0\\test.py']
+recent_files = ['SpaceInvaders-v0\\train.py', 'SpaceInvaders-v0\\PPO_agent.py', 'SpaceInvaders-v0\\PPO_NN.py', 'SpaceInvaders-v0\\test.py', 'D:\\software\\anaconda3\\envs\\grid2op\\Lib\\site-packages\\pypower\\t\\t_runmarket.py']
 
