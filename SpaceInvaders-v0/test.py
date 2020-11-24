@@ -14,7 +14,7 @@ else:
 
 if __name__ == '__main__':
      
-    env = gym.make('SpaceInvaders-v0').unwrapped#####unwrapped使done的步数不受限制
+    env = gym.make('SpaceInvaders-v0').unwrapped
     agent=PPO_agent(env)
     agent.test_agent(render=True,i_epoch=0)
 

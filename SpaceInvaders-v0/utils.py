@@ -1,4 +1,5 @@
 import numpy as np
+from torch.nn.functional import interpolate
 
 # gym.envs.registry.all
 
@@ -23,4 +24,24 @@ def check_illegal(obs,action):
         return True
     else:
         return False
+    
+    
+def rgb2gray(array):####(210,160,3)
+    from PIL import Image
+    img=Image.fromarray(array)
+    img = img.convert('L') 
+    img=np.array(img)
+    return img########(210,,160)
+def down_sampling(array):
+    import torch
+    tensor=torch.Tensor(array).unsqueeze(0).unsqueeze(0)
+    tensor= interpolate(tensor,size=[110,84])
+    array=tensor.squeeze(0).squeeze(0).numpy()
+    array=array[-84:,:]
+    return array
+
+def atari_state_preprocess(state):##########np.array(210,160,3)
+    state=rgb2gray(state)#####1.RGB转GRAY
+    state=down_sampling(state)####2.down_sampling
+    return state#######np.array(84,84)
     

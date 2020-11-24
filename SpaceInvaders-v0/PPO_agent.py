@@ -14,41 +14,39 @@ from torch.distributions import Normal, Categorical
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 import torch.nn as nn
 import torch.nn.functional as F
-
+from utils import atari_state_preprocess
 
 class PPO_agent():
     """
     The template to be used to create an agent: any controller of the power grid is expected to be a subclass of this
     grid2op.Agent.BaseAgent.
-    """
-    def _get_observation_size(self,input_tensor):        
-        x=torch.transpose(input_tensor, 1, 3)
-        x=torch.transpose(x, 2, 3)
-        model=CNN_for_atari()
-        y=model(x)
-        return y, y.shape[0]########y是tensor,y.shape[0]是数字
-    
+    """   
     def __init__(self, env):
         """Initialize a new agent."""
-        self.env=env
-        self.observation_shape=env.observation_space.shape####(210, 160, 3)需要卷积形成1维vector       
-        self.observation_shape=torch.randn(self.observation_shape).unsqueeze(0)##(1,210,160,3)的tensor
-        
-        _, self.observation_size=self._get_observation_size(self.observation_shape)
-        self.action_size=env.action_space.n        
-        self.Transition = namedtuple('Transition', ['state', 'action',  'a_log_prob', 'reward', 'next_state'])
+        self.env=env     
+        self.observation_size=256
+        self.action_size=env.action_space.n   
+        print(self.observation_size,self.action_size)
+               
         self.actor_net = Actor(self.observation_size,self.action_size)
         self.critic_net = Critic(self.observation_size)
+        self.cnn_net=CNN_for_atari()
+
+        self.Transition = namedtuple('Transition', ['state', 'action',  'a_log_prob', 'reward', 'next_state'])        
         self.buffer = []   
         self.hp=hp#########hyper-parameters-dict
         self.writer = SummaryWriter('./logs')
-        self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-3)
-        self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-3)   
+        self.optimizer = optim.Adam(itertools.chain(self.actor_net.parameters(),self.cnn_net.parameters(),self.critic_net.parameters()), 1e-3)
+
         if not os.path.exists('./model'):
             os.makedirs('./model')
 
-            
-
+    def rawstate_to_state(self,rawstate):####np.array(210,160,3)
+         state=atari_state_preprocess(rawstate)###(84,84)
+         state=torch.Tensor(state).unsqueeze(0).unsqueeze(0)
+         state=self.cnn_net(state)      
+         return state.detach().numpy()#######np.array(256)
+     
     def select_action(self, state):########(x,0),array
         state = torch.from_numpy(state).float().unsqueeze(0)
         with torch.no_grad():
@@ -108,21 +106,22 @@ class PPO_agent():
                 surr1 = ratio * advantage
                 surr2 = torch.clamp(ratio, 1 - self.hp['clip_param'], 1 + self.hp['clip_param']) * advantage
 
-                # update actor network
+
                 action_loss = -torch.min(surr1, surr2).mean()  # MAX->MIN desent
                 self.writer.add_scalar('loss/action_loss', action_loss, global_step=self.hp['training_step'])
-                self.actor_optimizer.zero_grad()
-                action_loss.backward()
-                nn.utils.clip_grad_norm_(self.actor_net.parameters(), self.hp['max_grad_norm'])
-                self.actor_optimizer.step()
-
-                #update critic network
+                             
                 value_loss = F.mse_loss(Gt_index, V)
                 self.writer.add_scalar('loss/value_loss', value_loss, global_step=self.hp['training_step'])
-                self.critic_net_optimizer.zero_grad()
-                value_loss.backward()
-                nn.utils.clip_grad_norm_(self.critic_net.parameters(), self.hp['max_grad_norm'])
-                self.critic_net_optimizer.step()
+               
+                total_loss=action_loss+value_loss
+                self.writer.add_scalar('loss/total_loss', total_loss, global_step=self.hp['training_step'])
+                
+                #update actor,critic,cnn network in the same time
+                self.optimizer.zero_grad()
+                total_loss.backward()
+                nn.utils.clip_grad_norm_(self.actor_net.parameters(), self.hp['max_grad_norm'])
+                nn.utils.clip_grad_norm_(self.critic_net.parameters(), self.hp['max_grad_norm'])                
+                self.optimizer.step()
                 self.hp['training_step'] += 1
 
         del self.buffer[:] # clear experience
@@ -130,23 +129,19 @@ class PPO_agent():
     def train_agent(self):        
         for i_epoch in range(self.hp['step']):
             print(i_epoch)
-            state=self.env.reset()
-            
-            state=torch.Tensor(state).unsqueeze(0)
-            state_after_CNN, _=self._get_observation_size(state)
-            state_after_CNN=state_after_CNN.detach().numpy()
+            rawstate=self.env.reset()#####np.array(210,160,3) 
+            state=self.rawstate_to_state(rawstate)####$(s),torch.Tensor(256)
             
             for t in count():
-                a, action_prob = self.select_action(state_after_CNN)         
-                next_state, reward, done, info = self.env.step(a)
                 
-                next_state=torch.Tensor(next_state).unsqueeze(0)
-                next_state_after_CNN, _=self._get_observation_size(next_state)
-                next_state_after_CNN=next_state_after_CNN.detach().numpy()  
+                a, action_prob = self.select_action(state)         
+                next_rawstate, reward, done, info = self.env.step(a)
                 
-                trans = self.Transition(state_after_CNN, a, action_prob, reward, next_state_after_CNN)
+                next_state=self.rawstate_to_state(next_rawstate)####$(s),torch.Tensor(256)
+                
+                trans = self.Transition(state, a, action_prob, reward, next_state)
                 self.store_transition(trans)
-                state_after_CNN = next_state_after_CNN
+                state = next_state
     
                 if done or t>=9999:
                     if len(self.buffer) >= self.hp['batch_size']:
@@ -154,31 +149,28 @@ class PPO_agent():
                     print('#################t:',t)
                     self.writer.add_scalar('livestep', t, global_step=i_epoch)
                     break
-            if i_epoch%100==0:
+            if i_epoch%50==0:
                 self.save_param(i_epoch)
                 print('save model!')
+                
     def test_agent(self,render,i_epoch):
         self.load_param(i_epoch,actor_model=self.actor_net,critic_model=self.critic_net)
         for i_epoch in range(self.hp['test_step']):
             print(i_epoch)
-            state=self.env.reset()
+            rawstate=self.env.reset()
             
-            state=torch.Tensor(state).unsqueeze(0)
-            state_after_CNN, _=self._get_observation_size(state)
-            state_after_CNN=state_after_CNN.detach().numpy()
+            state=self.rawstate_to_state(rawstate)####$(s),torch.Tensor(256)
             
             for t in count():
-                a, action_prob = self.select_action(state_after_CNN) 
+                a, action_prob = self.select_action(state) 
                 # print(a,action_prob)
-                next_state, reward, done, info = self.env.step(a)
+                next_rawstate, reward, done, info = self.env.step(a)
                 
-                next_state=torch.Tensor(next_state).unsqueeze(0)
-                next_state_after_CNN, _=self._get_observation_size(next_state)
-                next_state_after_CNN=next_state_after_CNN.detach().numpy()                 
+                next_state=self.rawstate_to_state(next_rawstate)####$(s),torch.Tensor(256)                
                 
                 if render==True:
                     self.env.render()
-                state_after_CNN = next_state_after_CNN
+                state = next_state
                 if done or t>=9999:
                     print('#################t:',t)
                     break        
