@@ -35,8 +35,8 @@ class PPO_agent():
         self.Transition = namedtuple('Transition', ['state', 'action',  'a_log_prob', 'reward', 'next_state'])        
         self.buffer = []   
         self.hp=hp#########hyper-parameters-dict
-        self.writer = SummaryWriter('./logs')
-        self.optimizer = optim.Adam(itertools.chain(self.actor_net.parameters(),self.cnn_net.parameters(),self.critic_net.parameters()), 1e-3)
+        self.writer = SummaryWriter('./logs2')
+        self.optimizer = optim.RMSprop(itertools.chain(self.actor_net.parameters(),self.cnn_net.parameters(),self.critic_net.parameters()), 1e-3)
 
         if not os.path.exists('./model'):
             os.makedirs('./model')
@@ -131,23 +131,23 @@ class PPO_agent():
             print(i_epoch)
             rawstate=self.env.reset()#####np.array(210,160,3) 
             state=self.rawstate_to_state(rawstate)####$(s),torch.Tensor(256)
-            
-            for t in count():
-                
-                a, action_prob = self.select_action(state)         
+            total_reward=0
+            for t in count():               
+                a, action_prob = self.select_action(state) 
+                # print(a,action_prob)
                 next_rawstate, reward, done, info = self.env.step(a)
-                
-                next_state=self.rawstate_to_state(next_rawstate)####$(s),torch.Tensor(256)
-                
+                next_state=self.rawstate_to_state(next_rawstate)####$(s),torch.Tensor(256)                
                 trans = self.Transition(state, a, action_prob, reward, next_state)
                 self.store_transition(trans)
                 state = next_state
-    
+                total_reward+=reward
+                
                 if done or t>=9999:
                     if len(self.buffer) >= self.hp['batch_size']:
                         self.update(i_epoch)
-                    print('#################t:',t)
+                    print('#################t:',t,'total_reward:',total_reward)
                     self.writer.add_scalar('livestep', t, global_step=i_epoch)
+                    self.writer.add_scalar('total_reward', total_reward, global_step=i_epoch)
                     break
             if i_epoch%50==0:
                 self.save_param(i_epoch)
@@ -160,19 +160,18 @@ class PPO_agent():
             rawstate=self.env.reset()
             
             state=self.rawstate_to_state(rawstate)####$(s),torch.Tensor(256)
-            
+            total_reward=0
             for t in count():
                 a, action_prob = self.select_action(state) 
                 # print(a,action_prob)
-                next_rawstate, reward, done, info = self.env.step(a)
-                
+                next_rawstate, reward, done, info = self.env.step(a)               
                 next_state=self.rawstate_to_state(next_rawstate)####$(s),torch.Tensor(256)                
-                
+                total_reward+=reward
                 if render==True:
                     self.env.render()
                 state = next_state
                 if done or t>=9999:
-                    print('#################t:',t)
+                    print('#################t:',t,'total_reward:',total_reward)
                     break        
 
 

@@ -10,7 +10,7 @@ hp={
     'log_interval':10,
     'counter':0,
     'training_step':0,
-    'step':1000,
+    'step':10000,
     'test_step':100
        }
 
